@@ -1,0 +1,95 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deriv Two-Rotator Selector</title>
+<style>
+body{margin:0;background:#0b1120;color:#eef2ff;font-family:Arial,sans-serif}.wrap{max-width:1000px;margin:auto;padding:18px}
+h1{margin:0 0 5px}.sub,.note{color:#9eabc4;font-size:13px;line-height:1.55}.card{background:#151e34;border:1px solid #2b3958;border-radius:15px;padding:16px;margin-bottom:14px}
+button{width:100%;padding:13px;border:0;border-radius:10px;background:#315ee8;color:#fff;font-weight:800;cursor:pointer}.stop{background:#8d293c}
+.main{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.box{background:#10182c;border:1px solid #344463;border-radius:12px;padding:15px}.label{font-size:11px;color:#9eabc4;text-transform:uppercase}.value{font-size:24px;font-weight:900;margin-top:8px}
+.signal{padding:20px;border-radius:13px;text-align:center;background:#332c17;color:#e5c65e;font-size:25px;font-weight:900}.signal.on{background:#123b2a;color:#55df91;border:1px solid #2d9563;animation:pulse 1s infinite}
+@keyframes pulse{50%{filter:brightness(1.35)}}table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:8px;border-bottom:1px solid #293653;text-align:left}th{color:#9eabc4}
+.bots{display:grid;grid-template-columns:1fr 1fr;gap:12px}.bot{background:#10182c;border:1px solid #344463;border-radius:12px;padding:15px}.bot h3{margin-top:0}
+@media(max-width:700px){.main{grid-template-columns:1fr 1fr}.bots{grid-template-columns:1fr}}@media(max-width:450px){.main{grid-template-columns:1fr}}
+</style></head>
+<body><div class="wrap">
+<h1>Deriv Two-Rotator Analysis Tool</h1>
+<div class="sub">Automatically chooses the stronger of your two rotating bots and alerts only at 84%+ confidence.</div>
+
+<div class="card"><div class="main">
+<div><button id="start">START ANALYSIS</button></div>
+<div><button class="stop" id="stop">STOP</button></div>
+<div class="box"><div class="label">Alarm threshold</div><div class="value">84%</div></div>
+<div class="box"><div class="label">Status</div><div class="value" id="status">STOPPED</div></div>
+</div></div>
+
+<div class="card"><div class="main">
+<div class="box"><div class="label">Volatility to use</div><div class="value" id="vol">—</div></div>
+<div class="box"><div class="label">Bot to use</div><div class="value" id="bot">—</div></div>
+<div class="box"><div class="label">Entry digit</div><div class="value" id="digit">—</div></div>
+<div class="box"><div class="label">Confidence</div><div class="value" id="conf">—</div></div>
+</div></div>
+
+<div class="card"><div id="signal" class="signal">WAITING FOR ANALYSIS</div><div class="note" style="text-align:center;margin-top:10px" id="msg">Start the scanner to begin continuous analysis.</div></div>
+
+<div class="card"><div class="bots">
+<div class="bot"><h3>BOT 1 — LOWER-SIDE ROTATOR</h3><div>Differs 0</div><div>Over 0</div><div>Over 1</div><p class="note">If Bot 1 is selected, use your first rotating bot. The analyzer does not choose which of its three stages to execute.</p></div>
+<div class="bot"><h3>BOT 2 — UPPER-SIDE ROTATOR</h3><div>Differs 9</div><div>Under 9</div><div>Under 8</div><p class="note">If Bot 2 is selected, use your second rotating bot. The analyzer does not choose which of its three stages to execute.</p></div>
+</div></div>
+
+<div class="card"><h3>Volatility scan</h3><table><thead><tr><th>Volatility</th><th>Recommended bot</th><th>Score</th><th>Entry digit</th></tr></thead><tbody id="rows"><tr><td colspan="4">Start analysis.</td></tr></tbody></table></div>
+
+<div class="card note"><b>Continuous mode:</b> after starting, the tool rescans approximately every 20 seconds while this page remains active and connected. If your phone/browser suspends the page, scanning may stop. The alarm is triggered only when the best score is at least 84%.
+<br><br><b>Important:</b> the confidence shown is a statistical model score, not a guaranteed probability of winning. The tool is an analysis companion and does not place trades.</div>
+</div>
+
+<script>
+const markets=[
+["Volatility 10","R_10"],["Volatility 25","R_25"],["Volatility 50","R_50"],["Volatility 75","R_75"],["Volatility 100","R_100"],
+["Volatility 10 (1s)","1HZ10V"],["Volatility 25 (1s)","1HZ25V"],["Volatility 50 (1s)","1HZ50V"],["Volatility 75 (1s)","1HZ75V"],["Volatility 100 (1s)","1HZ100V"]
+];
+let running=false;
+const $=id=>document.getElementById(id);
+
+function ld(q,p){if(p>0){let d=Math.max(0,Math.round(-Math.log10(p)));return +Number(q).toFixed(d).slice(-1)}let m=String(q).replace(/\D/g,'').match(/(\d)$/);return m?+m[1]:null}
+function prob(a,f){return (a.filter(f).length+1)/(a.length+2)}
+function stability(a,f){let z=[];[25,50,100,200].forEach(n=>{let x=a.slice(-Math.min(n,a.length));if(x.length>=15)z.push(prob(x,f))});if(z.length<2)return .75;return Math.max(0,1-(Math.max(...z)-Math.min(...z))/.25)}
+function fav(a,allowed){let c={};allowed.forEach(d=>c[d]=0);a.forEach(d=>{if(d in c)c[d]++});return allowed.reduce((b,d)=>c[d]>c[b]?d:b,allowed[0])}
+function model(a,bot){
+ // Bot 1: favorable side is low digits / exclusion of 0.
+ // Bot 2: favorable side is high digits / exclusion of 9.
+ let f=bot===1?(d=>d!==0):(d=>d!==9), allow=bot===1?[1,2,3,4,5,6,7,8,9]:[0,1,2,3,4,5,6,7,8];
+ let p=prob(a,f),s=stability(a,f),sample=Math.min(1,a.length/200);
+ // Score is deliberately conservative and bounded; it is not a claimed win probability.
+ let sideStrength=bot===1?Math.max(0,(p-.90)/.10):Math.max(0,(p-.90)/.10);
+ let c=Math.round(100*(.45*sideStrength+.35*s+.20*sample));
+ return {p,s,c,d:fav(a,allow)};
+}
+function get(symbol){return new Promise(resolve=>{
+ let w=new WebSocket("wss://api.derivws.com/trading/v1/options/ws/public"),done=false,t=setTimeout(()=>{if(!done){done=true;try{w.close()}catch(e){}resolve([])}},6500);
+ w.onopen=()=>w.send(JSON.stringify({ticks_history:symbol,end:"latest",count:250,style:"ticks",req_id:1}));
+ w.onmessage=e=>{try{let m=JSON.parse(e.data);if(m.msg_type==="history"&&m.history){clearTimeout(t);done=true;let p=m.pip_size??m.echo_req?.pip_size,a=m.history.prices.map(q=>ld(q,p)).filter(x=>x!=null);try{w.close()}catch(e){}resolve(a)}}catch(x){}};
+ w.onerror=()=>{clearTimeout(t);if(!done){done=true;resolve([])}}})}
+function beep(){try{let C=window.AudioContext||window.webkitAudioContext,c=new C,o=c.createOscillator,g=c.createGain();o=o();g=g();o.frequency.value=880;g.gain.value=.13;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.45)}catch(e){}}
+async function scan(){
+ if(!running)return;
+ let results=[];
+ for(let i=0;i<markets.length&&running;i++){
+  $("status").textContent="SCANNING "+markets[i][0];
+  let a=await get(markets[i][1]);if(a.length<20)continue;
+  let b1=model(a,1),b2=model(a,2),b=b1.c>=b2.c?{...b1,bot:1}:{...b2,bot:2};
+  results.push({vol:markets[i][0],...b});
+ }
+ if(!running)return;
+ results.sort((a,b)=>b.c-a.c);
+ $("rows").innerHTML=results.length?results.map(r=>`<tr><td>${r.vol}</td><td>BOT ${r.bot}</td><td>${r.c}%</td><td>${r.d}</td></tr>`).join(""):"<tr><td colspan=4>No data.</td></tr>";
+ if(results.length){
+  let b=results[0];
+  $("vol").textContent=b.vol;$("bot").textContent="BOT "+b.bot;$("digit").textContent=b.d;$("conf").textContent=b.c+"%";
+  if(b.c>=84){$("signal").className="signal on";$("signal").textContent="🔔 ENTER — BOT "+b.bot;$("msg").textContent=b.vol+" • Entry digit "+b.d+" • Confidence "+b.c+"%. Use the selected rotating bot.";beep()}
+  else{$("signal").className="signal";$("signal").textContent="WAIT — BELOW 84%";$("msg").textContent="Best current setup: Bot "+b.bot+" on "+b.vol+" at "+b.c+"%. No alarm."}
+ }
+ $("status").textContent="MONITORING";setTimeout(scan,20000)
+}
+$("start").onclick=()=>{if(!running){running=true;scan()}}
+$("stop").onclick=()=>{running=false;$("status").textContent="STOPPED";$("signal").className="signal";$("signal").textContent="ANALYSIS STOPPED";$("msg").textContent="No further scans or alarms."}
+</script></body></html>
